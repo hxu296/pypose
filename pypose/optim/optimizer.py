@@ -7,7 +7,7 @@ from torch.optim import Optimizer
 from .solver import PINV, Cholesky
 from torch.linalg import cholesky_ex
 from .corrector import FastTriggs
-
+import time
 
 class Trivial(torch.nn.Module):
     r"""
@@ -419,7 +419,8 @@ class LevenbergMarquardt(_Optimizer):
         self.corrector = [self.corrector] if not isinstance(self.corrector, (tuple, list)) else self.corrector
         self.corrector = [c if c is not None else Trivial() for c in self.corrector]
         self.model = RobustModel(model, kernel)
-
+        self.elapsed_total = 0
+        self.elapsed_jac = 0
 
     @torch.no_grad()
     def step(self, input, target=None, weight=None):
@@ -489,10 +490,14 @@ class LevenbergMarquardt(_Optimizer):
             `examples/module/pgo
             <https://github.com/pypose/pypose/tree/main/examples/module/pgo>`_.
         '''
+        start_total = time.time()
         for pg in self.param_groups:
             weight = self.weight if weight is None else weight
             R = list(self.model(input, target))
+            start_jac = time.time()
             J = modjac(self.model, input=(input, target), flatten=False, **self.jackwargs)
+            end_jac = time.time()
+            self.elapsed_jac += end_jac - start_jac
             params = dict(self.model.named_parameters())
             params_values = tuple(params.values())
             J = [self.model.flatten_row_jacobian(Jr, params_values) for Jr in J]
@@ -521,4 +526,6 @@ class LevenbergMarquardt(_Optimizer):
                     self.loss, self.reject_count = self.last, self.reject_count + 1
                 else:
                     break
+        end_total = time.time()
+        self.elapsed_total += end_total - start_total
         return self.loss
